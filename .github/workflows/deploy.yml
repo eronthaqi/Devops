@@ -1,0 +1,70 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      
+main
+
+jobs:
+  build-push-deploy:
+    runs-on: ubuntu-latest
+
+    env:
+      APP_NAME: my-app  # Name der App (für mehrere Apps anpassbar)
+      IMAGE_REGISTRY: registry.gitlab.com/suveson  # GitLab Container Registry
+      KUBE_NAMESPACE: default  # Falls später mehrere Namespaces genutzt werden
+
+    steps:
+    
+name: Checkout Code
+    uses: actions/checkout@v3
+
+    
+name: Set up Docker Buildx
+    uses: docker/setup-buildx-action@v2
+
+    
+name: Login to Container Registry
+    uses: docker/login-action@v2
+    with:
+      registry: registry.gitlab.com
+      username: ${{ secrets.CI_REGISTRY_USER }}
+      password: ${{ secrets.CI_REGISTRY_PASSWORD }}
+
+    
+name: Build Docker Image
+    run: |
+      IMAGE=$IMAGE_REGISTRY/$APP_NAME:${{ github.sha }}
+      docker build -t $IMAGE .
+      echo "IMAGE=$IMAGE" >> $GITHUB_ENV
+
+    
+name: Push Docker Image
+    run: |
+      docker push ${{ env.IMAGE }}
+
+    
+name: Set up kubectl
+    uses: azure/setup-kubectl@v3
+    with:
+      version: 'latest'
+
+    
+name: Set up Helm
+    uses: azure/setup-helm@v3
+
+    
+name: Set up Kubeconfig
+    run: |
+      mkdir -p ~/.kube
+      echo "${{ secrets.KUBECONFIG }}" | base64 --decode > ~/.kube/config
+
+    
+name: Deploy to Kubernetes using Helm
+    run: |
+      helm upgrade --install $APP_NAME helm/ \--set image.repository=${{ env.IMAGE }} \--set image.tag=${{ github.sha }} \--namespace $KUBE_NAMESPACE
+      if [ $? -ne 0 ]; then
+        echo "Helm deployment failed!"
+        exit 1
+      fi
